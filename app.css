@@ -1448,7 +1448,7 @@ input:checked + .slider:before {
    PLANERA MAP LAYOUT & PIN ENHANCEMENTS
    ========================================================================== */
 #planera-map-wrapper {
-  height: 350px !important;
+  height: 350px;
   box-shadow: var(--shadow-md);
   border-color: var(--border-focus);
 }
@@ -1659,7 +1659,9 @@ input:checked + .slider:before {
 /* ==========================================================================
    FULLSCREEN MAP ENHANCEMENTS
    ========================================================================== */
-.map-container-wrapper.fullscreen {
+.map-container-wrapper.fullscreen,
+#planera-map-wrapper.fullscreen,
+#korlage-map-wrapper.fullscreen {
   position: fixed !important;
   top: 0 !important;
   left: 0 !important;
