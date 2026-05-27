@@ -384,34 +384,57 @@ async function optimizeAndOrderRoute() {
   optimizeBtn.textContent = "Optimerar rutt...";
 
   try {
-    // 1. Resolve Pinned Stops from State
-    const startStop = state.stops.find(s => s.id === state.pinnedStartStopId);
-    const endStop = state.stops.find(s => s.id === state.pinnedEndStopId);
+    // Split into Visited (completed/failed) and Pending stops
+    const visited = state.stops.filter(s => s.status === "completed" || s.status === "failed");
+    let pending = state.stops.filter(s => s.status === "pending");
+
+    if (pending.length === 0) {
+      showSwedishModal("Inga väntande stopp", "Det finns inga väntande stopp att optimera. Alla stopp är redan markerade som levererade eller misslyckade.");
+      optimizeBtn.disabled = false;
+      optimizeBtn.textContent = "Optimera Rutt (Snabbaste vägen)";
+      return;
+    }
+
+    // 1. Resolve Pinned Stops from Pending State
+    const startStop = pending.find(s => s.id === state.pinnedStartStopId);
+    const endStop = pending.find(s => s.id === state.pinnedEndStopId);
     
-    // Filter intermediate stops (all deliveries except the pinned ones)
-    let intermediates = state.stops.filter(s => s.id !== state.pinnedStartStopId && s.id !== state.pinnedEndStopId);
+    // Filter intermediate pending stops (except the pinned ones)
+    let intermediates = pending.filter(s => s.id !== state.pinnedStartStopId && s.id !== state.pinnedEndStopId);
     
-    let finalSequence = [];
+    // Determine start anchor for pending optimization
+    // If there is a pinned start stop, use it.
+    // Otherwise, if there are visited stops, start from the last visited stop (driver's current location).
+    // Otherwise, start from the warehouse.
+    let startAnchor = state.warehouse;
+    if (startStop) {
+      startAnchor = startStop;
+    } else if (visited.length > 0) {
+      startAnchor = visited[visited.length - 1];
+    }
     
-    // Determine start and end anchors for intermediate optimization
-    const startAnchor = startStop ? startStop : state.warehouse;
+    // Determine end anchor for pending optimization
     const endAnchor = endStop ? endStop : state.warehouse;
     
-    // Optimize intermediate stops between anchors
-    let optimizedIntermediates = solveTSPWithOptionalPins(startAnchor, endAnchor, intermediates);
+    // Optimize intermediate pending stops between anchors
+    let optimizedPendingIntermediates = solveTSPWithOptionalPins(startAnchor, endAnchor, intermediates);
     
-    // Assemble final sequence
-    if (startStop) finalSequence.push(startStop);
-    finalSequence.push(...optimizedIntermediates);
-    if (endStop) finalSequence.push(endStop);
+    // Assemble final pending sequence
+    let finalPendingSequence = [];
+    if (startStop) finalPendingSequence.push(startStop);
+    finalPendingSequence.push(...optimizedPendingIntermediates);
+    if (endStop) finalPendingSequence.push(endStop);
     
-    state.stops = finalSequence;
-    state.currentStopIndex = 0; // Reset progress back to start since route changed
+    // Combined stops: visited stops stay at the front of the list, followed by optimized pending stops
+    state.stops = [...visited, ...finalPendingSequence];
+
+    // Reset current stop index to the first pending stop
+    state.currentStopIndex = visited.length;
 
     // 2. Fetch driving metadata and geometries from OSRM
     await calculateRouteGeometryAndStats();
     
-    showSwedishModal("Rutt optimerad", `Rutten har optimerats!<br>Körordningen har beräknats för att minimera restid och sträcka, med hänsyn till dina fasta leveranspunkter.`);
+    showSwedishModal("Rutt optimerad", `Rutten har optimerats!<br>De väntande leveranserna har sorterats för att minimera restiden, medan dina redan besökta stopp behåller sin historiska ordning.`);
     renderAll();
     if (mapPlanera) updatePlaneraMapPathsAndMarkers();
     if (map) updateMapPathsAndMarkers();
