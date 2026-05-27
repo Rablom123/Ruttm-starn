@@ -1584,3 +1584,75 @@ input:checked + .slider:before {
   border-color: var(--accent-orange);
   color: var(--accent-orange);
 }
+
+/* Clickable status badge pills in list */
+.status-pill-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 30px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-family: var(--font-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast) ease;
+}
+
+.status-pill-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-main);
+}
+
+.status-pill-btn.completed {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: var(--accent-emerald);
+  color: var(--accent-emerald);
+}
+
+.status-pill-btn.completed:hover {
+  background: rgba(16, 185, 129, 0.2);
+}
+
+.status-pill-btn.failed {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: var(--accent-crimson);
+  color: var(--accent-crimson);
+}
+
+.status-pill-btn.failed:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.status-pill-btn.pending {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-muted);
+}
+
+/* Color boundaries and dimming for completed & failed items in the Planera stops list */
+.stop-item.completed {
+  border-left: 4px solid var(--accent-emerald) !important;
+  background: rgba(16, 185, 129, 0.05);
+  opacity: 0.85;
+}
+
+.stop-item.completed .stop-address {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.stop-item.failed {
+  border-left: 4px solid var(--accent-crimson) !important;
+  background: rgba(239, 68, 68, 0.05);
+  opacity: 0.85;
+}
+
+.stop-item.failed .stop-address {
+  color: var(--text-muted);
+}
+

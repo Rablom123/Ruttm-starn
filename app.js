@@ -607,19 +607,25 @@ function renderPlaneraView() {
   // Render Stop Cards
   state.stops.forEach((stop, index) => {
     const li = document.createElement("li");
-    li.className = "stop-item";
+    li.className = "stop-item " + stop.status;
     li.setAttribute("draggable", "true");
     li.setAttribute("data-id", stop.id);
     li.setAttribute("data-index", index);
 
     // Color code and labels for delivery progress
     let badgeText = index + 1;
-    let statusHTML = "";
+    let statusText = "○ Väntar";
     if (stop.status === "completed") {
-      statusHTML = `<span class="icon-emerald" style="font-size: 0.72rem; font-weight:700;">✓ Levererad</span>`;
+      statusText = "✓ Levererad";
     } else if (stop.status === "failed") {
-      statusHTML = `<span class="icon-crimson" style="font-size: 0.72rem; font-weight:700;">⚠ Misslyckad</span>`;
+      statusText = "⚠ Misslyckad";
     }
+
+    const statusHTML = `
+      <button class="status-pill-btn ${stop.status}" onclick="toggleStopStatus('${stop.id}')" title="Klicka för att ändra status">
+        ${statusText}
+      </button>
+    `;
 
     const isStart = state.pinnedStartStopId === stop.id;
     const isEnd = state.pinnedEndStopId === stop.id;
@@ -711,6 +717,45 @@ window.togglePinEnd = function(id) {
   }
   renderAll();
   if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+};
+
+window.toggleStopStatus = function(stopId) {
+  const stop = state.stops.find(s => s.id === stopId);
+  if (stop) {
+    if (stop.status === "pending") {
+      stop.status = "completed";
+    } else if (stop.status === "completed") {
+      stop.status = "failed";
+    } else {
+      stop.status = "pending";
+    }
+    renderAll();
+    if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+    if (map) updateMapPathsAndMarkers();
+  }
+};
+
+window.selectAndFocusCarouselStop = function(index) {
+  state.currentStopIndex = index;
+  renderAll();
+  
+  // Center map and open popup on the Driving map
+  const stop = state.stops[index];
+  if (stop && map) {
+    map.setView([stop.lat, stop.lon], 15);
+    markersGroup.eachLayer(layer => {
+      if (layer.options.title === stop.address) {
+        layer.openPopup();
+      }
+    });
+  }
+};
+
+window.resetActiveStopStatus = function(index) {
+  state.stops[index].status = "pending";
+  renderAll();
+  if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+  if (map) updateMapPathsAndMarkers();
 };
 
 // ==========================================================================
@@ -920,16 +965,19 @@ function renderKorlageView() {
   percentLabel.textContent = `${deliveryPercent}% Färdigt`;
   bar.style.width = `${deliveryPercent}%`;
 
-  // Find current active stop. The active stop is the first stop with status "pending"
-  let activeIndex = state.stops.findIndex(s => s.status === "pending");
+  // Resolve active index (support manual stop browsing override)
+  if (state.currentStopIndex === undefined || state.currentStopIndex < 0 || state.currentStopIndex > totalStops) {
+    let firstPending = state.stops.findIndex(s => s.status === "pending");
+    state.currentStopIndex = firstPending !== -1 ? firstPending : totalStops;
+  }
+
+  let activeIndex = state.currentStopIndex;
   let activeStop = null;
   let isReturningToWarehouse = false;
 
-  if (activeIndex !== -1) {
-    state.currentStopIndex = activeIndex;
+  if (activeIndex >= 0 && activeIndex < totalStops) {
     activeStop = state.stops[activeIndex];
   } else {
-    // All stops processed -> Return to Warehouse state
     isReturningToWarehouse = true;
     state.currentStopIndex = totalStops; // virtual warehouse return index
   }
@@ -963,10 +1011,46 @@ function renderKorlageView() {
   } else {
     // delivery stop template
     const stopNumber = activeIndex + 1;
+    const isCompleted = activeStop.status === "completed";
+    const isFailed = activeStop.status === "failed";
+    
+    let badgeHTML = `<span class="active-badge blue">Stopp #${stopNumber}</span>`;
+    let actionsHTML = `
+      <button class="btn-nav-launch" onclick="launchGoogleMaps('${encodeURIComponent(activeStop.address)}')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+        Starta navigering
+      </button>
+
+      <div class="driver-action-grid">
+        <button class="btn-failed-delivery" onclick="markActiveStopFailed()">
+          Kunde ej leverera
+        </button>
+        <button class="btn-success" onclick="markActiveStopDelivered()">
+          Levererad
+        </button>
+      </div>
+    `;
+    
+    if (isCompleted) {
+      badgeHTML = `<span class="active-badge emerald" style="background:rgba(16,185,129,0.15); color:var(--accent-emerald);">Stopp #${stopNumber} - LEVERERAD ✓</span>`;
+      actionsHTML = `
+        <button class="btn-secondary" style="height:56px; font-weight:700; width:100%; border-color:var(--accent-emerald); background:rgba(16,185,129,0.05); color:var(--accent-emerald);" onclick="resetActiveStopStatus(${activeIndex})">
+          Återställ status (Väntar)
+        </button>
+      `;
+    } else if (isFailed) {
+      badgeHTML = `<span class="active-badge crimson" style="background:rgba(239,68,68,0.15); color:var(--accent-crimson);">Stopp #${stopNumber} - MISSLYCKAD ⚠</span>`;
+      actionsHTML = `
+        <button class="btn-secondary" style="height:56px; font-weight:700; width:100%; border-color:var(--accent-crimson); background:rgba(239,68,68,0.05); color:var(--accent-crimson);" onclick="resetActiveStopStatus(${activeIndex})">
+          Återställ status (Väntar)
+        </button>
+      `;
+    }
+
     container.innerHTML = `
-      <div class="active-stop-card delivery-stop">
+      <div class="active-stop-card ${isCompleted ? 'warehouse-stop' : (isFailed ? 'warehouse-stop' : 'delivery-stop')}" style="${isCompleted ? 'border-left-color:var(--accent-emerald);' : (isFailed ? 'border-left-color:var(--accent-crimson);' : '')}">
         <div class="card-badge-row">
-          <span class="active-badge blue">Stopp #${stopNumber}</span>
+          ${badgeHTML}
           <span class="active-eta-clock" id="active-stop-eta">ETA: Beräknar...</span>
         </div>
         <div class="active-address-block">
@@ -978,20 +1062,7 @@ function renderKorlageView() {
             </span>
           </div>
         </div>
-        
-        <button class="btn-nav-launch" onclick="launchGoogleMaps('${encodeURIComponent(activeStop.address)}')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
-          Starta navigering
-        </button>
-
-        <div class="driver-action-grid">
-          <button class="btn-failed-delivery" onclick="markActiveStopFailed()">
-            Kunde ej leverera
-          </button>
-          <button class="btn-success" onclick="markActiveStopDelivered()">
-            Levererad
-          </button>
-        </div>
+        ${actionsHTML}
       </div>
     `;
   }
@@ -1013,7 +1084,7 @@ function renderKorlageView() {
 
     const card = document.createElement("div");
     card.className = `carousel-card ${statusClass}`;
-    card.onclick = () => focusCarouselStop(index);
+    card.onclick = () => selectAndFocusCarouselStop(index);
 
     card.innerHTML = `
       <div class="carousel-header">
@@ -1036,11 +1107,17 @@ window.launchGoogleMaps = function(address) {
 
 // Driver marks active delivery successful
 window.markActiveStopDelivered = function() {
-  const activeIndex = state.stops.findIndex(s => s.status === "pending");
-  if (activeIndex !== -1) {
+  const activeIndex = state.currentStopIndex;
+  if (activeIndex >= 0 && activeIndex < state.stops.length) {
     state.stops[activeIndex].status = "completed";
     
-    // Automatically advance active window focus
+    // Automatically advance active window focus to the next pending stop
+    let nextPending = state.stops.findIndex((s, idx) => idx > activeIndex && s.status === "pending");
+    if (nextPending === -1) {
+      nextPending = state.stops.findIndex(s => s.status === "pending");
+    }
+    state.currentStopIndex = nextPending !== -1 ? nextPending : state.stops.length;
+    
     renderAll();
     
     // Recenter and re-plot map focus
@@ -1052,8 +1129,8 @@ window.markActiveStopDelivered = function() {
 // Driver marks active delivery failed
 // Moves current address to absolute end of queue directly before final return
 window.markActiveStopFailed = function() {
-  const activeIndex = state.stops.findIndex(s => s.status === "pending");
-  if (activeIndex !== -1) {
+  const activeIndex = state.currentStopIndex;
+  if (activeIndex >= 0 && activeIndex < state.stops.length) {
     const failedStop = state.stops[activeIndex];
     failedStop.status = "failed";
     
@@ -1071,6 +1148,13 @@ window.markActiveStopFailed = function() {
       status: "pending" // reset back to try again at final loop
     };
     state.stops.push(retryStop);
+
+    // Automatically advance active window focus to the next pending stop
+    let nextPending = state.stops.findIndex((s, idx) => idx >= activeIndex && s.status === "pending");
+    if (nextPending === -1) {
+      nextPending = state.stops.findIndex(s => s.status === "pending");
+    }
+    state.currentStopIndex = nextPending !== -1 ? nextPending : state.stops.length;
 
     // Recompute road itineraries
     calculateRouteGeometryAndStats().then(() => {
