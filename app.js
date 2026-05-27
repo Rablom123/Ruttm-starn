@@ -1131,37 +1131,23 @@ window.markActiveStopDelivered = function() {
 window.markActiveStopFailed = function() {
   const activeIndex = state.currentStopIndex;
   if (activeIndex >= 0 && activeIndex < state.stops.length) {
-    const failedStop = state.stops[activeIndex];
-    failedStop.status = "failed";
+    state.stops[activeIndex].status = "failed";
     
     showSwedishModal(
       "Leverans misslyckades", 
-      `Leveransen flyttades till slutet av kön (precis innan återresa till lagret) för ett nytt leveransförsök senare.`
+      `Stoppet har markerats som misslyckat och stannar kvar på sin position i listan.`
     );
-    
-    // Re-route logistics array sequencing
-    state.stops.splice(activeIndex, 1); // remove from current index position
-    
-    // Clone stop with reset status to try again later at the end of routing queue
-    const retryStop = {
-      ...failedStop,
-      status: "pending" // reset back to try again at final loop
-    };
-    state.stops.push(retryStop);
 
     // Automatically advance active window focus to the next pending stop
-    let nextPending = state.stops.findIndex((s, idx) => idx >= activeIndex && s.status === "pending");
+    let nextPending = state.stops.findIndex((s, idx) => idx > activeIndex && s.status === "pending");
     if (nextPending === -1) {
       nextPending = state.stops.findIndex(s => s.status === "pending");
     }
     state.currentStopIndex = nextPending !== -1 ? nextPending : state.stops.length;
 
-    // Recompute road itineraries
-    calculateRouteGeometryAndStats().then(() => {
-      renderAll();
-      if (mapPlanera) updatePlaneraMapPathsAndMarkers();
-      if (map) updateMapPathsAndMarkers();
-    });
+    renderAll();
+    if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+    if (map) updateMapPathsAndMarkers();
   }
 };
 
