@@ -53,6 +53,11 @@
       <!-- ================= PAGE 1: PLANERING ================= -->
       <section id="view-planera" class="view-section active">
         
+        <!-- Planera Interactive Map (Absolute Top & Enlarged) -->
+        <div class="map-container-wrapper" id="planera-map-wrapper" style="margin-bottom: 12px;">
+          <div id="leaflet-planera-map" style="width: 100%; height: 100%; z-index: 10;"></div>
+        </div>
+
         <!-- Warehouse & Settings Panel (Collapsible) -->
         <div class="dashboard-card settings-card">
           <div class="card-header" id="settings-toggle">
@@ -142,11 +147,6 @@
           </svg>
           Optimera Rutt (Snabbaste vägen)
         </button>
-
-        <!-- Planera Interactive Map -->
-        <div class="map-container-wrapper" id="planera-map-wrapper" style="margin-top: 8px; margin-bottom: 8px;">
-          <div id="leaflet-planera-map" style="width: 100%; height: 100%; z-index: 10;"></div>
-        </div>
 
         <!-- Route Stops Overview -->
         <div class="stops-section">

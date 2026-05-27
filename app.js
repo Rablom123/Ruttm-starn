@@ -14,6 +14,8 @@ const state = {
   stops: [],             // Array of stops: { id, address, lat, lon, status, cargoLoaded }
   activeTab: "planera",  // planera, lastlista, korlage
   currentStopIndex: 0,   // Current target stop index in Körläge
+  pinnedStartStopId: null, // Pinned first delivery stop
+  pinnedEndStopId: null,   // Pinned last delivery stop
 };
 
 // Map instances
@@ -65,6 +67,8 @@ function loadStateFromStorage() {
       state.lockWarehouse = parsed.lockWarehouse !== undefined ? parsed.lockWarehouse : true;
       state.stops = parsed.stops || [];
       state.currentStopIndex = parsed.currentStopIndex !== undefined ? parsed.currentStopIndex : 0;
+      state.pinnedStartStopId = parsed.pinnedStartStopId || null;
+      state.pinnedEndStopId = parsed.pinnedEndStopId || null;
     } catch (e) {
       console.error("Kunde inte läsa sparat tillstånd från localStorage", e);
     }
@@ -284,6 +288,8 @@ function initForms() {
       () => {
         state.stops = [];
         state.currentStopIndex = 0;
+        state.pinnedStartStopId = null;
+        state.pinnedEndStopId = null;
         state.roadDistance = 0;
         state.roadDuration = 0;
         state.roadGeometry = null;
@@ -359,7 +365,7 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-// Solves TSP using 2-opt search heuristic
+// Solves TSP using 2-opt search heuristic with optional start/end delivery pins
 async function optimizeAndOrderRoute() {
   if (state.stops.length === 0) {
     showSwedishModal("Inga adresser", "Lägg till minst en leveransadress innan du optimerar rutten.");
@@ -378,26 +384,34 @@ async function optimizeAndOrderRoute() {
   optimizeBtn.textContent = "Optimerar rutt...";
 
   try {
-    // 1. Gather all coordinate nodes
-    // If pinned, warehouse is fixed at position 0 (Start) and position N (End)
-    let locations = [...state.stops];
-    let optimizedStops = [];
-
-    if (state.lockWarehouse) {
-      // Euclidean TSP with locked endpoints
-      optimizedStops = solveLockedTSP(state.warehouse, locations);
-    } else {
-      // Standard open loop TSP starting at Warehouse
-      optimizedStops = solveOpenTSP(state.warehouse, locations);
-    }
-
-    state.stops = optimizedStops;
+    // 1. Resolve Pinned Stops from State
+    const startStop = state.stops.find(s => s.id === state.pinnedStartStopId);
+    const endStop = state.stops.find(s => s.id === state.pinnedEndStopId);
+    
+    // Filter intermediate stops (all deliveries except the pinned ones)
+    let intermediates = state.stops.filter(s => s.id !== state.pinnedStartStopId && s.id !== state.pinnedEndStopId);
+    
+    let finalSequence = [];
+    
+    // Determine start and end anchors for intermediate optimization
+    const startAnchor = startStop ? startStop : state.warehouse;
+    const endAnchor = endStop ? endStop : state.warehouse;
+    
+    // Optimize intermediate stops between anchors
+    let optimizedIntermediates = solveTSPWithOptionalPins(startAnchor, endAnchor, intermediates);
+    
+    // Assemble final sequence
+    if (startStop) finalSequence.push(startStop);
+    finalSequence.push(...optimizedIntermediates);
+    if (endStop) finalSequence.push(endStop);
+    
+    state.stops = finalSequence;
     state.currentStopIndex = 0; // Reset progress back to start since route changed
 
     // 2. Fetch driving metadata and geometries from OSRM
     await calculateRouteGeometryAndStats();
     
-    showSwedishModal("Rutt optimerad", `Rutten har optimerats!<br>Körordningen har beräknats för att minimera restid och sträcka.`);
+    showSwedishModal("Rutt optimerad", `Rutten har optimerats!<br>Körordningen har beräknats för att minimera restid och sträcka, med hänsyn till dina fasta leveranspunkter.`);
     renderAll();
     if (mapPlanera) updatePlaneraMapPathsAndMarkers();
     if (map) updateMapPathsAndMarkers();
@@ -413,110 +427,86 @@ async function optimizeAndOrderRoute() {
   }
 }
 
-// Solves Locked TSP (Start and End is Warehouse)
-function solveLockedTSP(warehouse, deliveryStops) {
-  let unvisited = [...deliveryStops];
-  let current = warehouse;
-  let orderedStops = [];
-
-  // Nearest Neighbor Starting heuristic
+// Generalized TSP solver that optimizes delivery points between two anchors (either warehouse or pinned stops)
+function solveTSPWithOptionalPins(startAnchor, endAnchor, stopsToOptimize) {
+  if (stopsToOptimize.length === 0) return [];
+  
+  let unvisited = [...stopsToOptimize];
+  let current = startAnchor;
+  let ordered = [];
+  
+  // Nearest Neighbor starting heuristic
   while (unvisited.length > 0) {
-    let bestIndex = 0;
-    let minDistance = Infinity;
+    let bestIdx = 0;
+    let minDist = Infinity;
     
     for (let i = 0; i < unvisited.length; i++) {
       let d = haversineDistance(current.lat, current.lon, unvisited[i].lat, unvisited[i].lon);
-      if (d < minDistance) {
-        minDistance = d;
-        bestIndex = i;
+      if (d < minDist) {
+        minDist = d;
+        bestIdx = i;
       }
     }
     
-    current = unvisited[bestIndex];
-    orderedStops.push(unvisited[bestIndex]);
-    unvisited.splice(bestIndex, 1);
+    current = unvisited[bestIdx];
+    ordered.push(current);
+    unvisited.splice(bestIdx, 1);
   }
-
-  // Refine with simple 2-opt edge-swap optimizer
+  
+  // Refine with 2-opt edge-swap optimizer
   let improved = true;
   let iterations = 0;
   const maxIterations = 200;
-
+  
+  // If lockWarehouse is false and no endStop is pinned, we don't have a fixed endAnchor.
+  // We check state.lockWarehouse or if endAnchor is the warehouse and lockWarehouse is false.
+  const hasFixedEnd = (endAnchor !== state.warehouse) || state.lockWarehouse;
+  const actualEnd = hasFixedEnd ? endAnchor : null;
+  
   while (improved && iterations < maxIterations) {
     improved = false;
     iterations++;
     
-    for (let i = 0; i < orderedStops.length - 1; i++) {
-      for (let j = i + 1; j < orderedStops.length; j++) {
-        // Evaluate swapping orderedStops[i] and orderedStops[j]
-        let currentDist = getSegmentDistance(warehouse, orderedStops, i, j);
-        let newDist = getSwappedSegmentDistance(warehouse, orderedStops, i, j);
+    for (let i = 0; i < ordered.length - 1; i++) {
+      for (let j = i + 1; j < ordered.length; j++) {
+        let distCurrent = 0;
+        let distNew = 0;
         
-        if (newDist < currentDist - 0.001) {
-          // Perform swap inversion
-          reverseSegment(orderedStops, i, j);
+        // Construct full path segment for evaluation
+        const fullList = [startAnchor, ...ordered];
+        if (actualEnd) fullList.push(actualEnd);
+        
+        // i in ordered maps to i+1 in fullList.
+        // j in ordered maps to j+1 in fullList.
+        const p1 = fullList[i];
+        const p2 = fullList[i + 1];
+        const p3 = fullList[j + 1];
+        const p4 = fullList[j + 2]; // endAnchor if j is at the end, or next node, or undefined
+        
+        if (!p2 || !p3) continue;
+        
+        distCurrent += haversineDistance(p1.lat, p1.lon, p2.lat, p2.lon);
+        if (p4) {
+          distCurrent += haversineDistance(p3.lat, p3.lon, p4.lat, p4.lon);
+        }
+        
+        distNew += haversineDistance(p1.lat, p1.lon, p3.lat, p3.lon);
+        if (p4) {
+          distNew += haversineDistance(p2.lat, p2.lon, p4.lat, p4.lon);
+        }
+        
+        if (distNew < distCurrent - 0.001) {
+          reverseSegment(ordered, i, j);
           improved = true;
         }
       }
     }
   }
-
-  return orderedStops;
-}
-
-// TSP Open Loop from Warehouse (no warehouse end-anchor requirement)
-function solveOpenTSP(warehouse, deliveryStops) {
-  let unvisited = [...deliveryStops];
-  let current = warehouse;
-  let orderedStops = [];
-
-  while (unvisited.length > 0) {
-    let bestIndex = 0;
-    let minDist = Infinity;
-    for (let i = 0; i < unvisited.length; i++) {
-      let d = haversineDistance(current.lat, current.lon, unvisited[i].lat, unvisited[i].lon);
-      if (d < minDist) {
-        minDist = d;
-        bestIndex = i;
-      }
-    }
-    current = unvisited[bestIndex];
-    orderedStops.push(unvisited[bestIndex]);
-    unvisited.splice(bestIndex, 1);
-  }
-  return orderedStops;
-}
-
-// 2-Opt Support Functions
-function getSegmentDistance(warehouse, array, i, j) {
-  let dist = 0;
-  const stopsList = [warehouse, ...array, warehouse]; // virtual full cycle
   
-  // Adjusted for index offset (array starts at index 1 in stopsList)
-  const p1 = stopsList[i];
-  const p2 = stopsList[i + 1];
-  const p3 = stopsList[j + 1];
-  const p4 = stopsList[j + 2];
-
-  dist += haversineDistance(p1.lat, p1.lon, p2.lat, p2.lon);
-  dist += haversineDistance(p3.lat, p3.lon, p4.lat, p4.lon);
-  return dist;
+  return ordered;
 }
 
-function getSwappedSegmentDistance(warehouse, array, i, j) {
-  let dist = 0;
-  const stopsList = [warehouse, ...array, warehouse];
-  
-  const p1 = stopsList[i];
-  const p2 = stopsList[j + 1]; // Swapped edge
-  const p3 = stopsList[i + 1]; // Swapped edge
-  const p4 = stopsList[j + 2];
-
-  dist += haversineDistance(p1.lat, p1.lon, p2.lat, p2.lon);
-  dist += haversineDistance(p3.lat, p3.lon, p4.lat, p4.lon);
-  return dist;
-}
-
+// 2-Opt Segment Swapping Helper
 function reverseSegment(array, i, j) {
   let left = i;
   let right = j;
@@ -631,6 +621,9 @@ function renderPlaneraView() {
       statusHTML = `<span class="icon-crimson" style="font-size: 0.72rem; font-weight:700;">⚠ Misslyckad</span>`;
     }
 
+    const isStart = state.pinnedStartStopId === stop.id;
+    const isEnd = state.pinnedEndStopId === stop.id;
+
     li.innerHTML = `
       <div class="drag-handle" title="Dra för att omorganisera">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
@@ -645,6 +638,14 @@ function renderPlaneraView() {
           <span>Stopptid: ${state.stopTime} min</span>
           ${statusHTML}
         </div>
+      </div>
+      <div class="stop-pin-actions">
+        <button class="btn-pin-tag ${isStart ? 'active-start' : ''}" onclick="togglePinStart('${stop.id}')" title="Fäst som startleverans">
+          ${isStart ? '★ Start' : 'Start'}
+        </button>
+        <button class="btn-pin-tag ${isEnd ? 'active-end' : ''}" onclick="togglePinEnd('${stop.id}')" title="Fäst som slutleverans">
+          ${isEnd ? '★ Slut' : 'Slut'}
+        </button>
       </div>
       <button class="stop-delete-btn" onclick="removeStop('${stop.id}')" aria-label="Ta bort stop">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
@@ -674,12 +675,42 @@ window.removeStop = function(id) {
   if (state.currentStopIndex >= state.stops.length) {
     state.currentStopIndex = Math.max(0, state.stops.length - 1);
   }
+  // Clear dangling pin references
+  if (state.pinnedStartStopId === id) state.pinnedStartStopId = null;
+  if (state.pinnedEndStopId === id) state.pinnedEndStopId = null;
+
   // Recompute road geometries since matrix altered
   calculateRouteGeometryAndStats().then(() => {
     renderAll();
     if (mapPlanera) updatePlaneraMapPathsAndMarkers();
     if (map) updateMapPathsAndMarkers();
   });
+};
+
+window.togglePinStart = function(id) {
+  if (state.pinnedStartStopId === id) {
+    state.pinnedStartStopId = null;
+  } else {
+    state.pinnedStartStopId = id;
+    if (state.pinnedEndStopId === id) {
+      state.pinnedEndStopId = null;
+    }
+  }
+  renderAll();
+  if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+};
+
+window.togglePinEnd = function(id) {
+  if (state.pinnedEndStopId === id) {
+    state.pinnedEndStopId = null;
+  } else {
+    state.pinnedEndStopId = id;
+    if (state.pinnedStartStopId === id) {
+      state.pinnedStartStopId = null;
+    }
+  }
+  renderAll();
+  if (mapPlanera) updatePlaneraMapPathsAndMarkers();
 };
 
 // ==========================================================================
@@ -1115,7 +1146,7 @@ function updatePlaneraMapPathsAndMarkers() {
   if (state.warehouse) {
     const warehouseIcon = L.divIcon({
       className: "custom-leaflet-marker orange",
-      html: `<div class="marker-pin orange">🏠</div>`,
+      html: `<div class="marker-pin orange"></div><div class="marker-num" style="font-size: 1rem; top: -1px;">🏠</div>`,
       iconSize: [30, 30],
       iconAnchor: [15, 30]
     });
@@ -1140,26 +1171,30 @@ function updatePlaneraMapPathsAndMarkers() {
   // 2. Draw Stop Markers (1 to N)
   state.stops.forEach((stop, index) => {
     let pinColor = "blue";
-    let emoji = "📦";
+    
+    const isStart = state.pinnedStartStopId === stop.id;
+    const isEnd = state.pinnedEndStopId === stop.id;
 
     if (stop.status === "completed") {
       pinColor = "emerald";
-      emoji = "✓";
     } else if (stop.status === "failed") {
       pinColor = "crimson";
-      emoji = "⚠";
+    } else if (isStart) {
+      pinColor = "emerald";
+    } else if (isEnd) {
+      pinColor = "orange";
     }
 
     const stopIcon = L.divIcon({
       className: `custom-leaflet-marker ${pinColor}`,
-      html: `<div class="marker-pin ${pinColor}">${emoji}</div><div class="marker-num">${index + 1}</div>`,
+      html: `<div class="marker-pin ${pinColor}"></div><div class="marker-num">${index + 1}</div>`,
       iconSize: [32, 32],
       iconAnchor: [16, 32]
     });
 
     const popupContent = `
       <div style="font-family: var(--font-primary); font-size: 0.85rem; color: #fff;">
-        <strong style="color:var(--accent-blue);">Stopp #${index + 1}</strong><br>
+        <strong style="color:var(--accent-blue);">Stopp #${index + 1} ${isStart ? '★ START' : ''} ${isEnd ? '★ SLUT' : ''}</strong><br>
         <span style="color:var(--text-muted);">${stop.address}</span><br>
         <button class="btn-primary" style="height:32px; padding:0 12px; font-size:0.8rem; margin-top:8px; width:100%; font-weight:700; border-radius:4px; display:inline-flex; align-items:center; justify-content:center; color:#fff;" onclick="launchGoogleMaps('${encodeURIComponent(stop.address)}')">
           Starta navigering
@@ -1270,22 +1305,18 @@ function updateMapPathsAndMarkers() {
   // 2. Draw Stop Markers
   state.stops.forEach((stop, index) => {
     let pinColor = "blue";
-    let emoji = "📦";
 
     if (stop.status === "completed") {
       pinColor = "emerald";
-      emoji = "✓";
     } else if (stop.status === "failed") {
       pinColor = "crimson";
-      emoji = "⚠";
     } else if (index === state.currentStopIndex) {
-      pinColor = "emerald glow";
-      emoji = "▶";
+      pinColor = "glow";
     }
 
     const stopIcon = L.divIcon({
       className: `custom-leaflet-marker ${pinColor}`,
-      html: `<div class="marker-pin ${pinColor}">${emoji}</div><div class="marker-num">${index + 1}</div>`,
+      html: `<div class="marker-pin ${pinColor}"></div><div class="marker-num">${index + 1}</div>`,
       iconSize: [32, 32],
       iconAnchor: [16, 32]
     });

@@ -1443,3 +1443,144 @@ input:checked + .slider:before {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ==========================================================================
+   PLANERA MAP LAYOUT & PIN ENHANCEMENTS
+   ========================================================================== */
+#planera-map-wrapper {
+  height: 350px !important;
+  box-shadow: var(--shadow-md);
+  border-color: var(--border-focus);
+}
+
+/* Drop-Pin dropletes and speech bubble arrows */
+.custom-leaflet-marker {
+  position: relative;
+  width: 36px !important;
+  height: 44px !important;
+  margin-left: -18px !important;
+  margin-top: -44px !important;
+}
+
+.marker-pin {
+  width: 36px;
+  height: 36px;
+  border-radius: 50% 50% 50% 0;
+  position: absolute;
+  transform: rotate(-45deg);
+  left: 50%;
+  top: 50%;
+  margin: -18px 0 0 -18px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #ffffff;
+  transition: all var(--transition-fast) ease;
+}
+
+/* Center circle inside drop-pin to make numbers stand out */
+.marker-pin::after {
+  content: "";
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  position: absolute;
+  z-index: 1;
+}
+
+/* Accent color overrides for drop-pin drop boundaries */
+.custom-leaflet-marker.blue .marker-pin {
+  background: var(--accent-blue);
+  border-color: #ffffff;
+}
+
+.custom-leaflet-marker.orange .marker-pin {
+  background: var(--accent-orange);
+  border-color: #ffffff;
+}
+
+.custom-leaflet-marker.emerald .marker-pin {
+  background: var(--accent-emerald);
+  border-color: #ffffff;
+}
+
+.custom-leaflet-marker.crimson .marker-pin {
+  background: var(--accent-crimson);
+  border-color: #ffffff;
+}
+
+/* Pulsing glow animation for the active driving stop */
+.custom-leaflet-marker.glow .marker-pin {
+  background: var(--accent-emerald);
+  box-shadow: 0 0 15px var(--accent-emerald-glow);
+  animation: pulse-glow 1.5s infinite;
+  border-color: #ffffff;
+}
+
+@keyframes pulse-glow {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+/* Centered stop number */
+.marker-num {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #ffffff;
+  z-index: 10;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+.custom-leaflet-marker.orange .marker-num {
+  font-size: 0.85rem;
+}
+
+/* Pin Action Badges styling for list items */
+.stop-pin-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+
+.btn-pin-tag {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  transition: all var(--transition-fast) ease;
+}
+
+.btn-pin-tag:hover {
+  background: var(--border-color);
+  color: var(--text-main);
+}
+
+.btn-pin-tag.active-start {
+  background: var(--accent-emerald-glow);
+  border-color: var(--accent-emerald);
+  color: var(--accent-emerald);
+}
+
+.btn-pin-tag.active-end {
+  background: var(--accent-orange-glow);
+  border-color: var(--accent-orange);
+  color: var(--accent-orange);
+}
