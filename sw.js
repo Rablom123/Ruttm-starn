@@ -1,4 +1,4 @@
-const CACHE_NAME = "ruttplaneraren-v6";
+const CACHE_NAME = "ruttplaneraren-v7";
 const ASSETS = [
   "./",
   "./index.html",
@@ -12,6 +12,7 @@ const ASSETS = [
 
 // Install Event
 self.addEventListener("install", (e) => {
+  self.skipWaiting(); // Force waiting service worker to active state immediately
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log("[Service Worker] Caching App Shell");
@@ -22,6 +23,7 @@ self.addEventListener("install", (e) => {
 
 // Activate Event
 self.addEventListener("activate", (e) => {
+  self.clients.claim(); // Immediately claim all open pages so they use the new SW without reloads
   e.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(

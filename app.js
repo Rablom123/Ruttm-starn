@@ -781,6 +781,20 @@ window.resetActiveStopStatus = function(index) {
   if (map) updateMapPathsAndMarkers();
 };
 
+window.toggleMapFullscreen = function(wrapperId, mapObj) {
+  const wrapper = document.getElementById(wrapperId);
+  if (wrapper) {
+    wrapper.classList.toggle("fullscreen");
+    
+    // Invalidate size immediately so Leaflet updates its viewport tiles
+    if (mapObj) {
+      setTimeout(() => {
+        mapObj.invalidateSize();
+      }, 150);
+    }
+  }
+};
+
 // ==========================================================================
 // 7. DRAG AND DROP HANDLERS (TACTILE LIST REORDER)
 // ==========================================================================

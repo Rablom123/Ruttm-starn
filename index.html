@@ -56,6 +56,14 @@
         <!-- Planera Interactive Map (Absolute Top & Enlarged) -->
         <div class="map-container-wrapper" id="planera-map-wrapper" style="margin-bottom: 12px;">
           <div id="leaflet-planera-map" style="width: 100%; height: 100%; z-index: 10;"></div>
+          <button class="btn-map-fullscreen" onclick="toggleMapFullscreen('planera-map-wrapper', mapPlanera)" title="Helskärm" aria-label="Visa karta i helskärm">
+            <svg class="icon-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <svg class="icon-shrink" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20" style="display:none;">
+              <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
         </div>
 
         <!-- Warehouse & Settings Panel (Collapsible) -->
@@ -221,8 +229,16 @@
       <section id="view-korlage" class="view-section">
         
         <!-- Interactive Dashboard Map -->
-        <div class="map-container-wrapper">
+        <div class="map-container-wrapper" id="korlage-map-wrapper">
           <div id="leaflet-route-map"></div>
+          <button class="btn-map-fullscreen" onclick="toggleMapFullscreen('korlage-map-wrapper', map)" title="Helskärm" aria-label="Visa karta i helskärm">
+            <svg class="icon-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <svg class="icon-shrink" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20" style="display:none;">
+              <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
           <div class="map-overlay-stats">
             <div class="stat-bubble">
               <span class="label">Kvarvarande tid</span>
