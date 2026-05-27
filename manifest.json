@@ -1,0 +1,22 @@
+{
+  "short_name": "Ruttplaneraren",
+  "name": "Ruttplaneraren - Smart Ruttoptimering",
+  "description": "Mobil ruttoptimering och lastlista för budbilar.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#121214",
+  "theme_color": "#1e1e24",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}
