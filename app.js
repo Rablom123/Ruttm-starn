@@ -21,6 +21,10 @@ let map = null;
 let routeLine = null;
 let markersGroup = null;
 
+let mapPlanera = null;
+let planeraRouteLine = null;
+let planeraMarkersGroup = null;
+
 // Drag and drop state
 let dragSrcEl = null;
 
@@ -44,8 +48,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Draw UI and initialize map on Driving Tab click
+  // Draw UI and initialize maps on startup
   renderAll();
+  setTimeout(initPlaneraMap, 100);
 });
 
 // Load state from localStorage
@@ -120,9 +125,11 @@ function initTabs() {
       const targetView = document.getElementById(`view-${targetTab}`);
       if (targetView) targetView.classList.add("active");
       
-      // If switching to Körläge, instantiate or update Map
+      // If switching to Körläge or Planera, instantiate or update Map
       if (targetTab === "korlage") {
         setTimeout(initLeafletMap, 100);
+      } else if (targetTab === "planera") {
+        setTimeout(initPlaneraMap, 100);
       }
       
       renderAll();
@@ -192,7 +199,11 @@ function initForms() {
           lon: coords.lon
         };
         showSwedishModal("Lager sparad", `Lagret har placerats på kartan:<br><strong>${formattedAddress}</strong>`);
-        renderAll();
+        calculateRouteGeometryAndStats().then(() => {
+          renderAll();
+          if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+          if (map) updateMapPathsAndMarkers();
+        });
       } else {
         showSwedishModal("Adressen hittades inte", `Kunde inte verifiera adressen: <strong>"${formattedAddress}"</strong>. Kontrollera stavning eller postnummer.`);
       }
@@ -243,7 +254,11 @@ function initForms() {
         
         state.stops.push(newStop);
         input.value = ""; // Clear input field
-        renderAll();
+        calculateRouteGeometryAndStats().then(() => {
+          renderAll();
+          if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+          if (map) updateMapPathsAndMarkers();
+        });
       } else {
         showSwedishModal("Adressen hittades inte", `Leveransadressen kunde inte verifieras:<br><strong>"${formattedAddress}"</strong>.<br><br>Säkerställ att gatunamn, husnummer och ort stämmer.`);
       }
@@ -269,7 +284,12 @@ function initForms() {
       () => {
         state.stops = [];
         state.currentStopIndex = 0;
+        state.roadDistance = 0;
+        state.roadDuration = 0;
+        state.roadGeometry = null;
         renderAll();
+        if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+        if (map) updateMapPathsAndMarkers();
       }
     );
   });
@@ -379,9 +399,14 @@ async function optimizeAndOrderRoute() {
     
     showSwedishModal("Rutt optimerad", `Rutten har optimerats!<br>Körordningen har beräknats för att minimera restid och sträcka.`);
     renderAll();
+    if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+    if (map) updateMapPathsAndMarkers();
   } catch (e) {
     console.error(e);
     showSwedishModal("Ruttoptimering klar", "Rutten sorterades med lokala distanser. Vissa nätverkskartor kan dröja.");
+    renderAll();
+    if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+    if (map) updateMapPathsAndMarkers();
   } finally {
     optimizeBtn.disabled = false;
     optimizeBtn.textContent = "Optimera Rutt (Snabbaste vägen)";
@@ -652,6 +677,8 @@ window.removeStop = function(id) {
   // Recompute road geometries since matrix altered
   calculateRouteGeometryAndStats().then(() => {
     renderAll();
+    if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+    if (map) updateMapPathsAndMarkers();
   });
 };
 
@@ -709,6 +736,8 @@ function handleDrop(e) {
     // Refresh calculations and render
     calculateRouteGeometryAndStats().then(() => {
       renderAll();
+      if (mapPlanera) updatePlaneraMapPathsAndMarkers();
+      if (map) updateMapPathsAndMarkers();
     });
   }
   return false;
@@ -893,7 +922,7 @@ function renderKorlageView() {
           </div>
         </div>
         ${state.warehouse ? `
-          <button class="btn-nav-launch" onclick="launchGoogleMaps('${state.warehouse.lat}', '${state.warehouse.lon}')">
+          <button class="btn-nav-launch" onclick="launchGoogleMaps('${encodeURIComponent(state.warehouse.address)}')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
             Starta navigering
           </button>
@@ -919,7 +948,7 @@ function renderKorlageView() {
           </div>
         </div>
         
-        <button class="btn-nav-launch" onclick="launchGoogleMaps('${activeStop.lat}', '${activeStop.lon}')">
+        <button class="btn-nav-launch" onclick="launchGoogleMaps('${encodeURIComponent(activeStop.address)}')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
           Starta navigering
         </button>
@@ -967,9 +996,10 @@ function renderKorlageView() {
   });
 }
 
-// Deep links standard destination coordinates to native Google Maps navigation
-window.launchGoogleMaps = function(lat, lon) {
-  const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=driving`;
+// Deep links standard destination address to native Google Maps navigation
+window.launchGoogleMaps = function(address) {
+  const decoded = decodeURIComponent(address);
+  const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(decoded)}&travelmode=driving`;
   window.open(url, "_blank");
 };
 
@@ -983,6 +1013,7 @@ window.markActiveStopDelivered = function() {
     renderAll();
     
     // Recenter and re-plot map focus
+    if (mapPlanera) updatePlaneraMapPathsAndMarkers();
     if (map) updateMapPathsAndMarkers();
   }
 };
@@ -1013,6 +1044,7 @@ window.markActiveStopFailed = function() {
     // Recompute road itineraries
     calculateRouteGeometryAndStats().then(() => {
       renderAll();
+      if (mapPlanera) updatePlaneraMapPathsAndMarkers();
       if (map) updateMapPathsAndMarkers();
     });
   }
@@ -1035,14 +1067,147 @@ window.focusCarouselStop = function(index) {
 // ==========================================================================
 // 10. LEAFLET INTERACTIVE ROAD MAP SETUP
 // ==========================================================================
+
+// --- PLANERA VIEW MAP ---
+function initPlaneraMap() {
+  if (mapPlanera !== null) {
+    mapPlanera.invalidateSize();
+    return;
+  }
+
+  const container = document.getElementById("leaflet-planera-map");
+  if (!container) return;
+
+  let centerLat = 56.6744; 
+  let centerLon = 12.8578;
+
+  if (state.warehouse) {
+    centerLat = state.warehouse.lat;
+    centerLon = state.warehouse.lon;
+  } else if (state.stops.length > 0) {
+    centerLat = state.stops[0].lat;
+    centerLon = state.stops[0].lon;
+  }
+
+  mapPlanera = L.map("leaflet-planera-map", {
+    zoomControl: true,
+    tap: false
+  }).setView([centerLat, centerLon], 12);
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  }).addTo(mapPlanera);
+
+  planeraMarkersGroup = L.featureGroup().addTo(mapPlanera);
+  
+  updatePlaneraMapPathsAndMarkers();
+}
+
+function updatePlaneraMapPathsAndMarkers() {
+  if (!mapPlanera || !planeraMarkersGroup) return;
+
+  planeraMarkersGroup.clearLayers();
+  if (planeraRouteLine) mapPlanera.removeLayer(planeraRouteLine);
+
+  let bounds = [];
+
+  // 1. Draw Warehouse Marker
+  if (state.warehouse) {
+    const warehouseIcon = L.divIcon({
+      className: "custom-leaflet-marker orange",
+      html: `<div class="marker-pin orange">🏠</div>`,
+      iconSize: [30, 30],
+      iconAnchor: [15, 30]
+    });
+    
+    const warehouseMarker = L.marker([state.warehouse.lat, state.warehouse.lon], {
+      icon: warehouseIcon,
+      title: state.warehouse.address
+    }).bindPopup(`
+      <div style="font-family: var(--font-primary); font-size: 0.85rem; color: #fff;">
+        <strong style="color:var(--accent-orange);">Start-/Slutlager</strong><br>
+        <span style="color:var(--text-muted);">${state.warehouse.address}</span><br>
+        <button class="btn-primary" style="height:32px; padding:0 12px; font-size:0.8rem; margin-top:8px; width:100%; font-weight:700; border-radius:4px; display:inline-flex; align-items:center; justify-content:center; color:#fff;" onclick="launchGoogleMaps('${encodeURIComponent(state.warehouse.address)}')">
+          Starta navigering
+        </button>
+      </div>
+    `);
+    
+    planeraMarkersGroup.addLayer(warehouseMarker);
+    bounds.push([state.warehouse.lat, state.warehouse.lon]);
+  }
+
+  // 2. Draw Stop Markers (1 to N)
+  state.stops.forEach((stop, index) => {
+    let pinColor = "blue";
+    let emoji = "📦";
+
+    if (stop.status === "completed") {
+      pinColor = "emerald";
+      emoji = "✓";
+    } else if (stop.status === "failed") {
+      pinColor = "crimson";
+      emoji = "⚠";
+    }
+
+    const stopIcon = L.divIcon({
+      className: `custom-leaflet-marker ${pinColor}`,
+      html: `<div class="marker-pin ${pinColor}">${emoji}</div><div class="marker-num">${index + 1}</div>`,
+      iconSize: [32, 32],
+      iconAnchor: [16, 32]
+    });
+
+    const popupContent = `
+      <div style="font-family: var(--font-primary); font-size: 0.85rem; color: #fff;">
+        <strong style="color:var(--accent-blue);">Stopp #${index + 1}</strong><br>
+        <span style="color:var(--text-muted);">${stop.address}</span><br>
+        <button class="btn-primary" style="height:32px; padding:0 12px; font-size:0.8rem; margin-top:8px; width:100%; font-weight:700; border-radius:4px; display:inline-flex; align-items:center; justify-content:center; color:#fff;" onclick="launchGoogleMaps('${encodeURIComponent(stop.address)}')">
+          Starta navigering
+        </button>
+      </div>
+    `;
+
+    const marker = L.marker([stop.lat, stop.lon], {
+      icon: stopIcon,
+      title: stop.address
+    }).bindPopup(popupContent);
+
+    planeraMarkersGroup.addLayer(marker);
+    bounds.push([stop.lat, stop.lon]);
+  });
+
+  // 3. Draw Road Routing Polyline path
+  let pathCoords = [];
+  if (state.roadGeometry) {
+    pathCoords = state.roadGeometry.coordinates.map(c => [c[1], c[0]]);
+  } else {
+    if (state.warehouse) pathCoords.push([state.warehouse.lat, state.warehouse.lon]);
+    state.stops.forEach(s => pathCoords.push([s.lat, s.lon]));
+    if (state.lockWarehouse && state.warehouse) pathCoords.push([state.warehouse.lat, state.warehouse.lon]);
+  }
+
+  if (pathCoords.length > 1) {
+    planeraRouteLine = L.polyline(pathCoords, {
+      color: "var(--accent-blue)",
+      weight: 5,
+      opacity: 0.8,
+      lineJoin: "round"
+    }).addTo(mapPlanera);
+  }
+
+  if (bounds.length > 0) {
+    mapPlanera.fitBounds(bounds, { padding: [40, 40] });
+  }
+}
+
+
+// --- KÖRLÄGE VIEW MAP ---
 function initLeafletMap() {
-  // Prevent duplicate initialization issues
   if (map !== null) {
     map.invalidateSize();
     return;
   }
 
-  // Centering on Halmstad (or Sweden if empty)
   let centerLat = 56.6744; 
   let centerLon = 12.8578;
 
@@ -1056,10 +1221,9 @@ function initLeafletMap() {
 
   map = L.map("leaflet-route-map", {
     zoomControl: true,
-    tap: false // prevents touch delays on mobile browsers
+    tap: false
   }).setView([centerLat, centerLon], 12);
 
-  // High contrast standard open-street tile layer (Custom CSS filter applies dark-mode rendering)
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
@@ -1088,8 +1252,16 @@ function updateMapPathsAndMarkers() {
     
     const warehouseMarker = L.marker([state.warehouse.lat, state.warehouse.lon], {
       icon: warehouseIcon,
-      title: "Warehouse"
-    }).bindPopup(`<strong>Lager</strong><br>${state.warehouse.address}`);
+      title: state.warehouse.address
+    }).bindPopup(`
+      <div style="font-family: var(--font-primary); font-size: 0.85rem; color: #fff;">
+        <strong style="color:var(--accent-orange);">Start-/Slutlager</strong><br>
+        <span style="color:var(--text-muted);">${state.warehouse.address}</span><br>
+        <button class="btn-primary" style="height:32px; padding:0 12px; font-size:0.8rem; margin-top:8px; width:100%; font-weight:700; border-radius:4px; display:inline-flex; align-items:center; justify-content:center; color:#fff;" onclick="launchGoogleMaps('${encodeURIComponent(state.warehouse.address)}')">
+          Starta navigering
+        </button>
+      </div>
+    `);
     
     markersGroup.addLayer(warehouseMarker);
     bounds.push([state.warehouse.lat, state.warehouse.lon]);
@@ -1107,7 +1279,7 @@ function updateMapPathsAndMarkers() {
       pinColor = "crimson";
       emoji = "⚠";
     } else if (index === state.currentStopIndex) {
-      pinColor = "emerald glow"; // current flashing target stop
+      pinColor = "emerald glow";
       emoji = "▶";
     }
 
@@ -1118,10 +1290,21 @@ function updateMapPathsAndMarkers() {
       iconAnchor: [16, 32]
     });
 
+    const popupContent = `
+      <div style="font-family: var(--font-primary); font-size: 0.85rem; color: #fff;">
+        <strong style="color:var(--accent-blue);">Stopp #${index + 1}</strong><br>
+        <span style="color:var(--text-muted);">${stop.address}</span><br>
+        <span style="font-size:0.75rem; color:var(--text-muted);">Status: ${stop.status === "pending" ? "Väntar" : (stop.status === "completed" ? "Levererad" : "Misslyckad")}</span><br>
+        <button class="btn-primary" style="height:32px; padding:0 12px; font-size:0.8rem; margin-top:8px; width:100%; font-weight:700; border-radius:4px; display:inline-flex; align-items:center; justify-content:center; color:#fff;" onclick="launchGoogleMaps('${encodeURIComponent(stop.address)}')">
+          Starta navigering
+        </button>
+      </div>
+    `;
+
     const marker = L.marker([stop.lat, stop.lon], {
       icon: stopIcon,
       title: stop.address
-    }).bindPopup(`<strong>Stopp #${index + 1}</strong><br>${stop.address}<br>Status: ${stop.status === "pending" ? "Väntar" : (stop.status === "completed" ? "Levererad" : "Misslyckad")}`);
+    }).bindPopup(popupContent);
 
     markersGroup.addLayer(marker);
     bounds.push([stop.lat, stop.lon]);
@@ -1130,10 +1313,8 @@ function updateMapPathsAndMarkers() {
   // 3. Draw Road Routing Polyline path
   let pathCoords = [];
   if (state.roadGeometry) {
-    // Map OSRM geojson structure to leaflet coordinate order (lat, lon)
     pathCoords = state.roadGeometry.coordinates.map(c => [c[1], c[0]]);
   } else {
-    // Direct lines fallback
     if (state.warehouse) pathCoords.push([state.warehouse.lat, state.warehouse.lon]);
     state.stops.forEach(s => pathCoords.push([s.lat, s.lon]));
     if (state.lockWarehouse && state.warehouse) pathCoords.push([state.warehouse.lat, state.warehouse.lon]);
@@ -1148,7 +1329,6 @@ function updateMapPathsAndMarkers() {
     }).addTo(map);
   }
 
-  // Fit boundaries automatically so driver views entire layout
   if (bounds.length > 0) {
     map.fitBounds(bounds, { padding: [40, 40] });
   }
